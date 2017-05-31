@@ -114,7 +114,6 @@ issue before anybody starts working on it.
 Questions?
 ==========
 
-Contact us at project-dune@googlegroups.com.
-
-Last edited: 04/03/17
+This is a fork of the original dune. Any bugs or erros should be
+reported to *gatowololo* at *gmail* dot *com* instead of the original dune folks.
 
