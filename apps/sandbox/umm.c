@@ -1,6 +1,6 @@
 /*
  * umm.c - Memory management routines for the untrusted process
- * 
+ *
  * FIXME: Need some sort of balanced tree to determine which address
  * ranges are free. For now we just use a heuristic approach that
  * potentially wastes virtual address space, but should still

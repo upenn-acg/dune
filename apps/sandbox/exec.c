@@ -1,4 +1,8 @@
-
+/**
+ * This file implements exec_execev. This function checks the given arguments, it seems
+ * to handle executables (checks for ELF format) versus bash scripts and run thems
+ * differently?
+ */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
