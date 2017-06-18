@@ -233,9 +233,8 @@ static long dune_pthread_create(struct dune_tf *tf)
 
 /* ==================================================================================== */
 /**
- * We handle cloning ourself. (For efficiency?)
- * Notice the child process in not automatically enrolled in Dune. So instead the child
- * makes a call to enter dune.
+ * We handle cloning ourselves. Notice the child process in not automatically enrolled in
+ * Dune. So instead the child makes a call to enter dune.
  */
 static long dune_clone(struct dune_tf *tf)
 {
@@ -243,11 +242,13 @@ static long dune_clone(struct dune_tf *tf)
   int rc;
   unsigned long pc;
 
+  // Macro wrapper for asm rdmsr instruction. Assigns results to pc.
   rdmsrl(MSR_GS_BASE, pc);
 
   if (ARG1(tf) != 0)
     return dune_pthread_create(tf);
 
+  // This has to do with segmentation register fs. Not sure what though...
   fs = dune_get_user_fs();
 
   rc = syscall(SYS_clone, ARG0(tf), ARG1(tf), ARG2(tf), ARG3(tf),
@@ -714,11 +715,14 @@ static void syscall_do(struct dune_tf *tf)
 */
 static void syscall_handler(struct dune_tf *tf)
 {
-  //	printf("Syscall No. %d\n", tf->rax);
-
   if (syscall_check_params(tf) == -1)
     return;
 
+  // Call our registered system call handler from @  dune_register_syscall_handler.
+  // This handler determines whether the system call should be propegated up as a
+  // hypercall or we merely return.
+  // Note: the syscall_handler may very well do the work itself to avoid a more
+  // expensive system call.
   if (!syscall_allow(tf))
     return;
 

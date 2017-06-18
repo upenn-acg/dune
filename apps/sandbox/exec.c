@@ -65,9 +65,9 @@ exec_execev(const char *filename, char *const argv[], char *const envp[])
             new_argv[i + 2] = argv[i];
         new_argv[arglen + 3] = NULL;
 
-        /*for (i = 0; new_argv[i] != NULL; i++)
+        for (i = 0; new_argv[i] != NULL; i++)
             printf("'%s' ", new_argv[i]);
-        printf("\n");*/
+        printf("\n");
 
         int status = fork();
         if (status < 0)
@@ -147,9 +147,9 @@ exec_execev(const char *filename, char *const argv[], char *const envp[])
             new_argv[arglen + 6] = NULL;
         }
 
-        /*for (i = 0; new_argv[i] != NULL; i++)
+        for (i = 0; new_argv[i] != NULL; i++)
             printf("'%s' ", new_argv[i]);
-        printf("\n");*/
+        printf("\n");
 
         int status = fork();
         if (status < 0)
