@@ -36,6 +36,8 @@
 #include "boxer.h"
 #include "libdune/cpu-x86.h"
 
+const char *sandbox_path = "./sandbox";
+
 struct thread_arg {
   pthread_cond_t	ta_cnd;
   pthread_mutex_t	ta_mtx;
@@ -43,7 +45,8 @@ struct thread_arg {
   struct dune_tf	*ta_tf;
 };
 
-int exec_execev(const char *filename, char *const argv[], char *const envp[]);
+int exec_execev(const char *filename, char *const argv[], char *const envp[],
+                const char* exePath);
 
 static boxer_syscall_cb _syscall_monitor;
 static pthread_mutex_t _syscall_mtx;
@@ -654,7 +657,8 @@ static void syscall_do_foreal(struct dune_tf *tf)
   case SYS_execve:
     tf->rax = exec_execev((const char *)ARG0(tf),
                           (char **const)ARG1(tf),
-                          (char **const)ARG2(tf));
+                          (char **const)ARG2(tf),
+                          sandbox_path);
     break;
 
 

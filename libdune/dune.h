@@ -114,6 +114,12 @@ extern void dune_pop_trap_frame(struct dune_tf *tf);
 extern int dune_jump_to_user(struct dune_tf *tf);
 extern void dune_ret_from_user(int ret)  __attribute__ ((noreturn));
 extern void dune_dump_trap_frame(struct dune_tf *tf);
+/**
+ * Given a trap frame containing a system call pointed by tf->rax as well as the
+ * appropriate arguments in the registers, call the actual OS to perform the system call.
+ * This happens when we are using a monitor to intercept system calls, any system call we
+ * want to allow is merely passed "up" to the OS above.
+ */
 extern void dune_passthrough_syscall(struct dune_tf *tf);
 
 // page allocation
@@ -332,19 +338,19 @@ extern int dune_enter();
 
 /**
  * dune_init_and_enter - initializes libdune and enters "Dune mode"
- * 
+ *
  * This is a simple initialization routine that handles everything
  * in one go. Note that you still need to call dune_enter() in
  * each new forked child or thread.
- * 
+ *
  * Returns 0 on success, otherwise failure.
  */
 static inline int dune_init_and_enter(void)
 {
 	int ret;
-	
+
 	if ((ret = dune_init(1)))
 		return ret;
-	
+
 	return dune_enter();
 }

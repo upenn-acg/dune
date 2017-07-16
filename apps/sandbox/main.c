@@ -1,5 +1,13 @@
 #define _GNU_SOURCE
 
+/**
+ * A clever malicious program, could exploit vurnerabilities in the loader, by crafting
+ * a ELF header that would exploit the loader. Therefore we do not trust the standard
+ * loader to load the program we are trying to sandbox. We use our own minimal loader
+ * to bring the loader into the sandbox. From inside the sandbox we use the real loader.
+
+ */
+
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
@@ -274,6 +282,22 @@ static int run_app(uintptr_t sp, uintptr_t e_entry)
 
 extern char **environ;
 
+/**
+ * Main entry point into sandbox. A syscall monitor should be registered before calling
+ * this function through @boxer_register_syscall_monitor().
+
+ * This function takes an argv where:
+ * 1) the [0] argument is the name of this executable.
+ * 2) the [1] argument is a path to the linker to use.
+ * 3) the [2] argument is a path to the executable that the linker will run.
+ * 4) the [3] argument is the arguments of the executable.
+
+ * Basically this functions calls @dune_init(), @dune_enter(), allocates memory for the
+ * stack, reads the binary linker file.
+ * Then it sets up the stack by placing the command line arguments, enviornment variables
+ * on the top of the stack, then calling @jump_to_user(). I think it literally jumps to
+ * the data section in memory and runs the raw binary data it read from @load_elf().
+ */
 int boxer_main(int argc, char *argv[])
 {
 	int ret;
@@ -320,6 +344,8 @@ int boxer_main(int argc, char *argv[])
 		return ret;
 	}
 
+        /* Setup stack pointer by placing arguments on our stack and setting the start
+           of the code to the loader we read in. */
 	sp = setup_arguments(sp, argv[1], &argv[2], environ, data);
 	if (!sp) {
 		printf("failed to setup arguments\n");

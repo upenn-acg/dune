@@ -1,8 +1,8 @@
 CC      = gcc
 LD	= ld
 RANLIB	= ranlib
-CFLAGS  = -Wall -O2 -MD -I ../../
-LDFLAGS = -O2 -L. -L ../../libdune -lsandbox -ldune -lpthread -T sandbox.ld
+CFLAGS  = -Wall -O0 -g -MD -I ../../
+LDFLAGS = -O0 -g -L. -L ../../libdune -lsandbox -ldune -lpthread -T sandbox.ld
 OBJ     = main.o umm.o trap.o exec.o
 
 all: libsandbox.a sandbox
