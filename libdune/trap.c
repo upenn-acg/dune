@@ -162,6 +162,11 @@ void dune_trap_handler(int num, struct dune_tf *tf)
 		dune_die();
 		break;
 
+        case T_ILLOP:
+          dune_printf("Found illegal opcode! Dying.\n");
+		dune_dump_trap_frame(tf);
+		dune_die();
+                break;
 	default:
 		dune_printf("unhandled exception %d\n", num);
 		dune_dump_trap_frame(tf);
