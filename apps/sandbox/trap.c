@@ -96,6 +96,9 @@ pgflt_handler(uintptr_t addr, uint64_t fec, struct dune_tf *tf)
   }
 }
 /* ==================================================================================== */
+/**
+ * Check whether the address the user is trying to access is valid.
+ */
 int check_extent(const void *ptr, size_t len)
 {
   if (!mem_ref_is_safe(ptr, len)) {
