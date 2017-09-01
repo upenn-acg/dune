@@ -62,6 +62,34 @@
 #include "vmx.h"
 #include "compat.h"
 
+/* These are currently not defined in my linux headers. One day these definitions should
+   be added and these lines will be unnecessary. Per Intel 64 and IA-32 Architectures
+   Software Developer's Manual, Volume 3; Apendix C enumerates the exit reasons.*/
+#ifndef EXIT_REASON_RDRAND
+#define EXIT_REASON_RDRAND 57
+#endif
+
+#ifndef EXIT_REASON_RDSEED
+#define EXIT_REASON_RDSEED 61
+#endif
+
+#ifndef SECONDARY_EXEC_RDRAND
+#define SECONDARY_EXEC_RDRAND 0x800
+#endif
+
+#ifndef SECONDARY_EXEC_RDSEED
+#define SECONDARY_EXEC_RDSEED 0x10000
+#endif
+
+
+enum randOperandSize{
+  RAND_OPSIZE_16BIT,
+  RAND_OPSIZE_32BIT,
+  RAND_OPSIZE_64BIT
+};
+
+typedef enum randOperandSize RandOperandSize;
+
 static atomic_t vmx_enable_failed;
 
 static DECLARE_BITMAP(vmx_vpid_bitmap, VMX_NR_VPIDS);
@@ -359,7 +387,7 @@ static __init int setup_vmcs_config(struct vmcs_config *vmcs_conf)
   if (adjust_vmx_controls(min, opt, MSR_IA32_VMX_PINBASED_CTLS,
                           &_pin_based_exec_control) < 0)
     return -EIO;
-
+  // Flags for CPU based primary processor-based exit controls.
   min =
 #ifdef CONFIG_X86_64
     CPU_BASED_CR8_LOAD_EXITING |
@@ -367,11 +395,17 @@ static __init int setup_vmcs_config(struct vmcs_config *vmcs_conf)
 #endif
     CPU_BASED_CR3_LOAD_EXITING |
     CPU_BASED_CR3_STORE_EXITING |
+
     CPU_BASED_MOV_DR_EXITING |
     CPU_BASED_USE_TSC_OFFSETING |
+    /* From Detbox. We want to trap calls to RDTSC and RDTSCP. */
+    CPU_BASED_RDTSC_EXITING |
+    /* From Detbox. We want to trap calls to RDPMC. */
+    CPU_BASED_RDPMC_EXITING |
     CPU_BASED_INVLPG_EXITING;
 
   opt = CPU_BASED_TPR_SHADOW |
+
     CPU_BASED_USE_MSR_BITMAPS |
     CPU_BASED_ACTIVATE_SECONDARY_CONTROLS;
   if (adjust_vmx_controls(min, opt, MSR_IA32_VMX_PROCBASED_CTLS,
@@ -382,12 +416,19 @@ static __init int setup_vmcs_config(struct vmcs_config *vmcs_conf)
     _cpu_based_exec_control &= ~CPU_BASED_CR8_LOAD_EXITING &
       ~CPU_BASED_CR8_STORE_EXITING;
 #endif
+  // Set Secondary processor-based VM-execution controls.
   if (_cpu_based_exec_control & CPU_BASED_ACTIVATE_SECONDARY_CONTROLS) {
     min2 = 0;
     opt2 =  SECONDARY_EXEC_WBINVD_EXITING |
       SECONDARY_EXEC_ENABLE_VPID |
       SECONDARY_EXEC_ENABLE_EPT |
+      /* This flag is needed othewise calls to RDTSCP will cause an invalid
+         opcode exceptions. */
       SECONDARY_EXEC_RDTSCP |
+      /* Create a VMEXIT on calls to RDRAND. */
+      SECONDARY_EXEC_RDRAND |
+      /* Create a VMEXIT on calls to RDSEED. */
+      /* SECONDARY_EXEC_RDSEED | */
       SECONDARY_EXEC_ENABLE_INVPCID;
     if (adjust_vmx_controls(min2, opt2,
                             MSR_IA32_VMX_PROCBASED_CTLS2,
@@ -964,12 +1005,10 @@ static void vmx_setup_vmcs(struct vmx_vcpu *vcpu)
     /* Keep arch.pat sync with GUEST_IA32_PAT */
     vmx->vcpu.arch.pat = host_pat;
   }
-
   for (i = 0; i < NR_VMX_MSR; ++i) {
     u32 index = vmx_msr_index[i];
     u32 data_low, data_high;
     int j = vmx->nmsrs;
-
     if (rdmsr_safe(index, &data_low, &data_high) < 0)
       continue;
     if (wrmsr_safe(index, data_low, data_high) < 0)
@@ -1239,11 +1278,14 @@ static void make_pt_regs(struct vmx_vcpu *vcpu, struct pt_regs *regs,
   vmx_put_cpu(vcpu);
 
   /*
-   * NOTE: Since Dune processes use the kernel's LSTAR syscall address, we need special
-   * logic to handle certain system calls (fork, clone, etc.) The specifc issue is that we
-   * can not jump to a high address in a child process since it is not running in Dune.
-   * Our solution is to adopt a special Dune convention where the desired %RIP address is
-   * provided in %RCX. */
+   * NOTE: Since Dune processes use the kernel's LSTAR
+   * syscall address, we need special logic to handle
+   * certain system calls (fork, clone, etc.) The specifc
+   * issue is that we can not jump to a high address
+   * in a child process since it is not running in Dune.
+   * Our solution is to adopt a special Dune convention
+   * where the desired %RIP address is provided in %RCX.
+   */
   if (!(__addr_ok(regs->ip)))
     regs->ip = regs->cx;
 
@@ -1335,8 +1377,8 @@ static void vmx_init_syscall(void)
  * vmx_run_vcpu - launches the CPU into non-root mode
  * @vcpu: the vmx instance to launch
  */
-static int __noclone vmx_run_vcpu(struct vmx_vcpu *vcpu){
-  /* printk(KERN_ERR "Running virtual CPU!"); */
+static int __noclone vmx_run_vcpu(struct vmx_vcpu *vcpu)
+{
   asm(
       /* Store host registers */
       "push %%"R"dx; push %%"R"bp;"
@@ -1450,7 +1492,6 @@ static int __noclone vmx_run_vcpu(struct vmx_vcpu *vcpu){
            vmcs_read32(VM_INSTRUCTION_ERROR));
     return VMX_EXIT_REASONS_FAILED_VMENTRY;
   }
-  /* printk(KERN_ERR "Finished current run of VCPU!"); */
 
   return vmcs_read32(VM_EXIT_REASON);
 
@@ -1460,13 +1501,10 @@ static int __noclone vmx_run_vcpu(struct vmx_vcpu *vcpu){
   vmx_recover_nmi_blocking(vmx);
   vmx_complete_interrupts(vmx);
 #endif
-
 }
 
-static void vmx_step_instruction(void){
-  /* u64 address = vmcs_readl(GUEST_RIP); */
-
-  /* printk(KERN_ERR "My address: %llu", address); */
+static void vmx_step_instruction(void)
+{
   vmcs_writel(GUEST_RIP, vmcs_readl(GUEST_RIP) +
               vmcs_read32(VM_EXIT_INSTRUCTION_LEN));
 }
@@ -1505,44 +1543,31 @@ static int vmx_handle_ept_violation(struct vmx_vcpu *vcpu)
   return ret;
 }
 
-/**
- * All system call are turned into VMCALLs and we let the VMM monitor handle them.
- * Here we actually perform the system call by finding it on out system call table.
- * TODO: What stops the user from sending malformed arguments and crashing the
- * VMM with a bad address, let's say?
- */
-static void vmx_handle_syscall(struct vmx_vcpu *vcpu){
+static void vmx_handle_syscall(struct vmx_vcpu *vcpu)
+{
   __u64 orig_rax;
 
-  /* printk(KERN_ERR "vmx::vmx_handle_syscall\n"); */
   if (unlikely(vcpu->regs[VCPU_REGS_RAX] > NUM_SYSCALLS)) {
     vcpu->regs[VCPU_REGS_RAX] = -EINVAL;
-    printk(KERN_ERR "vmx::vmx_handle_syscall: bad syscall number.\n");
     return;
   }
 
   if (unlikely(vcpu->regs[VCPU_REGS_RAX] == __NR_sigaltstack ||
                vcpu->regs[VCPU_REGS_RAX] == __NR_iopl)) {
-    printk(KERN_INFO "vmx: got unsupported syscall.\n");
+    printk(KERN_INFO "vmx: got unsupported syscall\n");
     vcpu->regs[VCPU_REGS_RAX] = -EINVAL;
     return;
   }
 
-  /* Why isn't this set at the top? Can the value change from there? */
   orig_rax = vcpu->regs[VCPU_REGS_RAX];
-  /* printk(KERN_ERR "vmx::vmx_handle_syscall: attempting system call: %llu...\n", orig_rax); */
 
   asm(
-      // Move current values from virtual cpu to actual core.
       "mov %c[rax](%0), %%"R"ax \n\t"
       "mov %c[rdi](%0), %%"R"di \n\t"
       "mov %c[rsi](%0), %%"R"si \n\t"
       "mov %c[rdx](%0), %%"R"dx \n\t"
       "mov %c[r8](%0),  %%r8  \n\t"
       "mov %c[r9](%0),  %%r9  \n\t"
-
-      // Find address offset of systemCallTable + systemCallLocation and
-      // dereference function pointer to make call.
       "mov %c[syscall](%0), %%r10 \n\t"
       "mov %0, %%r11 \n\t"
       "push %0 \n\t"
@@ -1565,9 +1590,8 @@ static void vmx_handle_syscall(struct vmx_vcpu *vcpu){
       : "cc", "memory", R"ax", R"dx", R"di", R"si", "r8", "r9", "r10"
       );
 
-  /* printk(KERN_ERR "vmx::vmx_handle_syscall: Completed system call. Checking value...\n"); */
-
-  /* We apply the restart semantics as if no signal handler will be executed. */
+  /* We apply the restart semantics as if no signal handler will be
+   * executed. */
   switch (vcpu->regs[VCPU_REGS_RAX]) {
   case -ERESTARTNOHAND:
   case -ERESTARTSYS:
@@ -1584,16 +1608,12 @@ static void vmx_handle_syscall(struct vmx_vcpu *vcpu){
     vmx_put_cpu(vcpu);
     break;
   }
-
-  /* printk(KERN_ERR "vmx::vmx_handle_syscall: finished handling %llu\n", orig_rax); */
 }
 
 /**
- * The VMM montior trapped on call to cpuid. Here we handle this opcode.
- * TODO: Change to deterministic implementation.
+ * TODO: What to return for cpuid?
  */
-static void vmx_handle_cpuid(struct vmx_vcpu *vcpu)
-{
+static void vmx_handle_cpuid(struct vmx_vcpu *vcpu){
   unsigned int eax, ebx, ecx, edx;
 
   eax = vcpu->regs[VCPU_REGS_RAX];
@@ -1606,9 +1626,116 @@ static void vmx_handle_cpuid(struct vmx_vcpu *vcpu)
 }
 
 /**
- * Handle non-maskable interrupt (NMI). Apparently these cannot be ignored and usually
- * signify as unrecoverable hardware error or alike.
+ * There is a few subtleties. I don't want to squash the wrong registers. According to
+ * the Intel Developer's manual:
+ * Reads the current value of the processor’s time-stamp counter (a 64-bit MSR) into the
+ * EDX:EAX registers. The EDX register is loaded with the high-order 32 bits of the MSR
+ * and the EAX register is loaded with the low-order 32 bits. (On processors that support
+ * the Intel 64 architecture, the high-order 32 bits of each of RAX and RDX are cleared.
+ * I will just assume that we are in 64 bits.
  */
+static void vmx_handle_rdtsc(struct vmx_vcpu *vcpu){
+  // We assume the time is one. So we put 0 as the hob in EDX.
+  int ourTime = 1;
+  vcpu->regs[VCPU_REGS_RDX] = 0;
+  // Mask out lower 32 bits and add 1.
+  vcpu->regs[VCPU_REGS_RAX] = ourTime;
+
+  return;
+}
+
+static void vmx_handle_rdtscp(struct vmx_vcpu *vcpu){
+  // Do the rdtsc part.
+  vmx_handle_rdtsc(vcpu);
+  // TODO: Set ECX to 1?
+  vcpu->regs[VCPU_REGS_RCX] = ourTime;
+
+  return;
+}
+
+/**
+ * Unlike RDTSC and RDTSCP, I will not clear out the higher order bits of RAX and RBX.
+ * TODO: More robust implementation?
+ */
+static void vmx_handle_rdpmc(struct vmx_vcpu *vcpu){
+  // We assume the time is one. So we put 0 as the hob in EDX.
+  int ourTime = 1;
+  u64 savedRegValue = vcpu->regs[VCPU_REGS_RDX];
+  // Zero out lower 32 bits.
+  vcpu->regs[VCPU_REGS_RDX] = savedRegValue & 0xFFFFFFFF00000000;
+
+  // Mask out lower 32 bits and add 1.
+  savedRegValue = vcpu->regs[VCPU_REGS_RAX];
+  // TODO
+  vcpu->regs[VCPU_REGS_RAX] = (savedRegValue & 0xFFFFFFFF0000000) | ourTime;
+  return;
+}
+
+/**
+ * Handle the rdrand instruction by putting a constant value in the correct register.
+ * We cannot increment the value for any process running dune that calls rdrand will
+ * end up here. Therefore multiple unrelated processes can increment this counter.
+ * We are careful to only write to the registers we are supposed based on the size of
+ * the register the user wants.
+ * TODO: How to set CF bit?
+ */
+static int vmx_handle_rdrand(struct vmx_vcpu *vcpu){
+  // Parse instruction information per Table 27-12 On the Intel Manual Volume 3.
+  u32 insVector = vmcs_read32(VMX_INSTRUCTION_INFO);
+  // Bits [6:3] contain the Destination register.
+  enum vmx_reg destRegister = (insVector >> 3) & 0xF;
+  // Bits [12:11] contain the operand size.
+  u32 operandSize = (insVector >> 11) & 0x3;
+  u32 rand = 12345;
+  // We may only want to modify eax or ax. So we remember the contents of the whole
+  // register.
+  u64 destRegContents;
+
+  if(destRegister > 15){
+    printk(KERN_ERR "vmx::vmx_handle_rdrand: "
+           "Unexpected destination register for RDRAND instruction: %d", destRegister);
+    return 1;
+  }
+
+  // TODO: Warning, the only reason this works is because vmx.h's struct:
+  // vmx_reg has the exact same structure as our destRegister. This is only in
+  // x86_64 and may cause funny issues in 32 bit versions. Also if this struct ever
+  // changes form, we could end up writing to the wrong register.
+  destRegContents = vcpu->regs[destRegister];
+
+  switch(operandSize){
+    // Keep higher 48 bits.
+  case RAND_OPSIZE_16BIT:
+    // Combine higher order 48 bits with first 16 bits of rand to create new value.
+    vcpu->regs[destRegister] =
+      (destRegContents & 0xFFFFFFFFFFFF0000) | (rand & 0xFFFF);
+    break;
+    // Keep higher 32 bits.
+  case RAND_OPSIZE_32BIT:
+    // Combine higher order 48 bits with first 16 bits of rand to create new value.
+    vcpu->regs[destRegister] =
+      // Keep only higher 32 bits.
+      (destRegContents & 0xFFFFFFFF00000000) | rand;
+    break;
+  case RAND_OPSIZE_64BIT:
+    vcpu->regs[destRegister] = (u64) rand;
+    break;
+  default:
+    printk(KERN_ERR "vmx::vmx_handle_rdrand: "
+           "Unexpected operand size for RDRAND instruction: %d", operandSize);
+    return 1;
+  }
+
+  return 0;
+}
+
+/**
+ * Same exact thing as @mvx_handle_rdrand.
+ */
+static int vmx_handle_rdseed(struct vmx_vcpu* vcpu){
+  return vmx_handle_rdrand(vcpu);
+}
+
 static int vmx_handle_nmi_exception(struct vmx_vcpu *vcpu)
 {
   u32 intr_info;
@@ -1638,10 +1765,10 @@ int vmx_launch(struct dune_config *conf, int64_t *ret_code)
   if (!vcpu)
     return -ENOMEM;
 
-  printk(KERN_ERR "vmx::vmx_launch: created VCPU (VPID %d)\n",
+  printk(KERN_ERR "vmx: created VCPU (VPID %d)\n",
          vcpu->vpid);
 
-  while(1){
+  while (1) {
     vmx_get_cpu(vcpu);
 
     /* We assume that a Dune process will always use the FPU whenever it is entered, and
@@ -1670,6 +1797,9 @@ int vmx_launch(struct dune_config *conf, int64_t *ret_code)
 
     setup_perf_msrs(vcpu);
 
+    // Returns exit reason in the form a 32 bit vector. Intel 64 and IA-32
+    // Architectures Software Developer's Manual, Volume 3; Apendix C
+    // enumerates the exit reasons.
     ret = vmx_run_vcpu(vcpu);
 
     /* We need to handle NMIs before interrupts are enabled */
@@ -1688,17 +1818,60 @@ int vmx_launch(struct dune_config *conf, int64_t *ret_code)
 
     vmx_put_cpu(vcpu);
 
-    if (ret == EXIT_REASON_VMCALL){
+    if (ret == EXIT_REASON_VMCALL)
       vmx_handle_syscall(vcpu);
-    }
-    else if (ret == EXIT_REASON_CPUID)
+    else if (ret == EXIT_REASON_CPUID){
       vmx_handle_cpuid(vcpu);
+    }
     else if (ret == EXIT_REASON_EPT_VIOLATION)
       done = vmx_handle_ept_violation(vcpu);
     else if (ret == EXIT_REASON_EXCEPTION_NMI) {
       if (vmx_handle_nmi_exception(vcpu))
         done = 1;
-    } else if (ret != EXIT_REASON_EXTERNAL_INTERRUPT) {
+    }
+
+    // Above, we have set the bits to exit the VM in case of: RDRAND, RDSEED, RDTSC and
+    // RDTSCP. We handle those exit conditions here:
+
+    //RDTSC
+    else if (ret == EXIT_REASON_RDTSC){
+      printk(KERN_INFO "Caught call to RDTSC\n");
+      vmx_handle_rdtsc(vcpu);
+      vmx_step_instruction();
+    }
+    //RDTSCP
+    else if (ret == EXIT_REASON_RDTSCP){
+      printk(KERN_INFO "Caught call to RDTSCP\n");
+      vmx_handle_rdtscp(vcpu);
+      vmx_step_instruction();
+    }
+    //RDTSCP
+    else if (ret == EXIT_REASON_RDPMC){
+      printk(KERN_INFO "Caught call to RDPMC\n");
+      vmx_handle_rdpmc(vcpu);
+      vmx_step_instruction();
+    }
+    // Call to RDRAND!
+    else if (ret == EXIT_REASON_RDRAND){
+      int returnVal = vmx_handle_rdrand(vcpu);
+      vmx_step_instruction();
+      if(returnVal != 0){
+        vmx_dump_cpu(vcpu);
+        done = 1;
+      }
+
+    }
+    // Call to RDSEED!
+    else if (ret == EXIT_REASON_RDSEED){
+      int returnVal = vmx_handle_rdseed(vcpu);
+      vmx_step_instruction();
+      if(returnVal != 0){
+        vmx_dump_cpu(vcpu);
+        done = 1;
+      }
+    }
+    // Reason for exit unkown/unimplemented. Exit.
+    else if (ret != EXIT_REASON_EXTERNAL_INTERRUPT) {
       printk(KERN_INFO "unhandled exit: reason %d, exit qualification %x\n",
              ret, vmcs_read32(EXIT_QUALIFICATION));
       vcpu->ret_code = DUNE_RET_UNHANDLED_VMEXIT;
