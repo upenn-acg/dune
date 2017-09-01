@@ -1645,8 +1645,10 @@ static void vmx_handle_rdtsc(struct vmx_vcpu *vcpu){
 }
 
 static void vmx_handle_rdtscp(struct vmx_vcpu *vcpu){
+  int ourTime = 1;
   // Do the rdtsc part.
   vmx_handle_rdtsc(vcpu);
+
   // TODO: Set ECX to 1?
   vcpu->regs[VCPU_REGS_RCX] = ourTime;
 
