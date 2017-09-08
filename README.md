@@ -1,4 +1,5 @@
-* Changes
+* Changes:
+
 This is our fork of the original dune repo. We plan to use Dune as the basis for
 a project on runtime enforcement of determinism. We will make any changes to libdune
 and the dune kernel module here, while factoring out the determinising client code as
@@ -53,7 +54,7 @@ if these requirements are met.
 Setup
 =====
 
-# make
+# sudo make
 # insmod kern/dune.ko
 # test/hello
 
