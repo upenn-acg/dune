@@ -2,10 +2,12 @@
  * dune.h - the libdune API
  */
 
-#pragma once
+#ifndef HEADER_DUNE
+#define HEADER_DUNE
 
 #include <sys/queue.h>
 #include <stdbool.h>
+#include <sys/types.h>
 
 #include "mmu.h"
 #include "elf.h"
@@ -354,3 +356,5 @@ static inline int dune_init_and_enter(void)
 
 	return dune_enter();
 }
+
+#endif

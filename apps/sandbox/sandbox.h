@@ -31,7 +31,8 @@
 static inline bool mem_ref_is_safe(const void *ptr, size_t len)
 {
 	uintptr_t begin = (uintptr_t) ptr;
-	uintptr_t end = (uintptr_t) (ptr + len);
+	// Convert to (char*) to avoid pointer arithmetic.
+	uintptr_t end = (uintptr_t) ((char*) ptr + len);
 
 	if (len <= APP_MAX_ELF_VADDR &&
 	    begin >= 0 &&

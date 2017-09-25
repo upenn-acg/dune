@@ -57,6 +57,7 @@
 #include <asm/unistd_64.h>
 #include <asm/virtext.h>
 #include <asm/traps.h>
+#include <linux/mutex.h>
 
 #include "dune.h"
 #include "vmx.h"
@@ -80,6 +81,9 @@
 #ifndef SECONDARY_EXEC_RDSEED
 #define SECONDARY_EXEC_RDSEED 0x10000
 #endif
+
+// Mutex for ept.
+DEFINE_MUTEX(eptLock);
 
 
 enum randOperandSize{
@@ -1509,10 +1513,15 @@ static void vmx_step_instruction(void)
               vmcs_read32(VM_EXIT_INSTRUCTION_LEN));
 }
 
-static int vmx_handle_ept_violation(struct vmx_vcpu *vcpu)
-{
+static int vmx_handle_ept_violation(struct vmx_vcpu *vcpu){
   unsigned long gva, gpa;
   int exit_qual, ret;
+
+  // Start critical section.
+  if(mutex_lock_interruptible(&eptLock)){
+    /* Process interrupted. Nothing for us to do? */
+    return 1;
+  }
 
   vmx_get_cpu(vcpu);
   exit_qual = vmcs_read32(EXIT_QUALIFICATION);
@@ -1540,6 +1549,9 @@ static int vmx_handle_ept_violation(struct vmx_vcpu *vcpu)
     vmx_dump_cpu(vcpu);
   }
 
+  // End critical section
+  mutex_unlock(&eptLock);
+
   return ret;
 }
 
@@ -1547,6 +1559,8 @@ static void vmx_handle_syscall(struct vmx_vcpu *vcpu)
 {
   __u64 orig_rax;
 
+  /* Check if system call number is bigger than the total amount of system calls on
+     system, if so, throw error. */
   if (unlikely(vcpu->regs[VCPU_REGS_RAX] > NUM_SYSCALLS)) {
     vcpu->regs[VCPU_REGS_RAX] = -EINVAL;
     return;
@@ -1804,6 +1818,13 @@ int vmx_launch(struct dune_config *conf, int64_t *ret_code)
     // enumerates the exit reasons.
     ret = vmx_run_vcpu(vcpu);
 
+    if(VMX_EXIT_REASONS_FAILED_VMENTRY == ret){
+      printk(KERN_ERR "FAILED_VMENTRY");
+      break;
+    }
+
+    /* printk(KERN_ERR "Exit reason number %d\n", ret); */
+
     /* We need to handle NMIs before interrupts are enabled */
     exit_intr_info = vmcs_read32(VM_EXIT_INTR_INFO);
     if ((exit_intr_info & INTR_INFO_INTR_TYPE_MASK) == INTR_TYPE_NMI_INTR &&
@@ -1825,13 +1846,20 @@ int vmx_launch(struct dune_config *conf, int64_t *ret_code)
     else if (ret == EXIT_REASON_CPUID){
       vmx_handle_cpuid(vcpu);
     }
-    else if (ret == EXIT_REASON_EPT_VIOLATION)
+    else if (ret == EXIT_REASON_EPT_VIOLATION){
+      /* printk(KERN_ERR "Caught call to handle ept violation.\n"); */
       done = vmx_handle_ept_violation(vcpu);
+      /* printk(KERN_ERR "Successfully handled EPT violation.\n"); */
+    }
     else if (ret == EXIT_REASON_EXCEPTION_NMI) {
       if (vmx_handle_nmi_exception(vcpu))
         done = 1;
     }
 
+    else if(ret == 31){
+      printk(KERN_ERR "VM has reached an invalid state...");
+      done = 1;
+    }
     // Above, we have set the bits to exit the VM in case of: RDRAND, RDSEED, RDTSC and
     // RDTSCP. We handle those exit conditions here:
 
@@ -1872,6 +1900,7 @@ int vmx_launch(struct dune_config *conf, int64_t *ret_code)
         done = 1;
       }
     }
+
     // Reason for exit unkown/unimplemented. Exit.
     else if (ret != EXIT_REASON_EXTERNAL_INTERRUPT) {
       printk(KERN_INFO "unhandled exit: reason %d, exit qualification %x\n",
@@ -1923,6 +1952,7 @@ static __init int __vmx_enable(struct vmcs *vmxon_buf)
   __vmxon(phys_addr);
   vpid_sync_vcpu_global();
   ept_sync_global();
+
 
   return 0;
 }
