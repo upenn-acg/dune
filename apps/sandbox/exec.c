@@ -46,7 +46,7 @@ getlen(char *const arr[])
  */
 int exec_execev(const char *programToExecute, char *const argv[],
                 char *const envp[], const char* sandboxExecutable){
-  /* printf("programToExecute %s\n", programToExecute); */
+  printf("programToExecute %s\n", programToExecute);
   int i;
   int fd;
   int len;

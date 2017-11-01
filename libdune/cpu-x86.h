@@ -1,3 +1,6 @@
+#ifndef CPUX86_H
+#define CPUX86_H
+
 /*
  * cpu-x86.h - header for X86 hardware features
  */
@@ -82,3 +85,5 @@ struct idtd {
 // These are arbitrarily chosen, but with care not to overlap
 // processor defined exceptions or interrupt vectors.
 #define T_SYSCALL   48		// system call
+
+#endif

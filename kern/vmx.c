@@ -57,7 +57,6 @@
 #include <asm/unistd_64.h>
 #include <asm/virtext.h>
 #include <asm/traps.h>
-#include <linux/mutex.h>
 
 #include "dune.h"
 #include "vmx.h"
@@ -81,9 +80,6 @@
 #ifndef SECONDARY_EXEC_RDSEED
 #define SECONDARY_EXEC_RDSEED 0x10000
 #endif
-
-// Mutex for ept.
-DEFINE_MUTEX(eptLock);
 
 
 enum randOperandSize{
@@ -767,8 +763,7 @@ void vmx_ept_sync_individual_addr(struct vmx_vcpu *vcpu, gpa_t gpa)
  * vmx_dump_cpu - prints the CPU state
  * @vcpu: VCPU to print
  */
-static void vmx_dump_cpu(struct vmx_vcpu *vcpu)
-{
+static void vmx_dump_cpu(struct vmx_vcpu *vcpu){
   unsigned long flags;
   int i;
   unsigned long *sp, val;
@@ -1514,14 +1509,9 @@ static void vmx_step_instruction(void)
 }
 
 static int vmx_handle_ept_violation(struct vmx_vcpu *vcpu){
+  // Guest virtual/physical address.
   unsigned long gva, gpa;
   int exit_qual, ret;
-
-  // Start critical section.
-  if(mutex_lock_interruptible(&eptLock)){
-    /* Process interrupted. Nothing for us to do? */
-    return 1;
-  }
 
   vmx_get_cpu(vcpu);
   exit_qual = vmcs_read32(EXIT_QUALIFICATION);
@@ -1529,28 +1519,29 @@ static int vmx_handle_ept_violation(struct vmx_vcpu *vcpu){
   gpa = vmcs_read64(GUEST_PHYSICAL_ADDRESS);
   vmx_put_cpu(vcpu);
 
+  printk(KERN_ERR "Handle Ept Violation: Guest Physical Address 0x%lx\n", gpa);
+  printk(KERN_ERR "Handle Ept Violation: Guest Virtual Address 0x%lx\n", gva);
   if (exit_qual & (1 << 6)) {
-    printk(KERN_ERR "EPT: GPA 0x%lx exceeds GAW!\n", gpa);
+    printk(KERN_ERR "Dune vmx::vmx_handle_ept_violation:"
+	   "Guest Physical Address 0x%lx exceeds GAW.\n", gpa);
     return -EINVAL;
   }
 
   if (!(exit_qual & (1 << 7))) {
-    printk(KERN_ERR "EPT: linear address is not valid, GPA: 0x%lx!\n", gpa);
+    printk(KERN_ERR "Dune vmx::vmx_handle_ept_violation: Linear address is not valid.\n"
+	   "Guest Physical Address: 0x%lx!\n", gpa);
     return -EINVAL;
   }
 
   ret = vmx_do_ept_fault(vcpu, gpa, gva, exit_qual);
 
-  if (ret) {
-    printk(KERN_ERR "vmx: page fault failure "
-           "GPA: 0x%lx, GVA: 0x%lx\n",
-           gpa, gva);
+  if(ret){
+    printk(KERN_ERR "Dune vmx::vmx_handle_ept_violation: Unable to handle page fault."
+           "Guest Physical Address: 0x%lx.\n"
+	   "Guest Virtual Address: 0x%lx\n", gpa, gva);
     vcpu->ret_code = DUNE_RET_EPT_VIOLATION;
     vmx_dump_cpu(vcpu);
   }
-
-  // End critical section
-  mutex_unlock(&eptLock);
 
   return ret;
 }
@@ -1792,6 +1783,7 @@ int vmx_launch(struct dune_config *conf, int64_t *ret_code)
        trap FPU usage inside a Dune process. */
     compat_fpu_restore();
 
+    // IRQ: Interrupt request.
     local_irq_disable();
 
     if (need_resched()) {
@@ -1847,9 +1839,7 @@ int vmx_launch(struct dune_config *conf, int64_t *ret_code)
       vmx_handle_cpuid(vcpu);
     }
     else if (ret == EXIT_REASON_EPT_VIOLATION){
-      /* printk(KERN_ERR "Caught call to handle ept violation.\n"); */
       done = vmx_handle_ept_violation(vcpu);
-      /* printk(KERN_ERR "Successfully handled EPT violation.\n"); */
     }
     else if (ret == EXIT_REASON_EXCEPTION_NMI) {
       if (vmx_handle_nmi_exception(vcpu))
@@ -1903,7 +1893,7 @@ int vmx_launch(struct dune_config *conf, int64_t *ret_code)
 
     // Reason for exit unkown/unimplemented. Exit.
     else if (ret != EXIT_REASON_EXTERNAL_INTERRUPT) {
-      printk(KERN_INFO "unhandled exit: reason %d, exit qualification %x\n",
+      printk(KERN_INFO "unhandled exit: reason 0x%x, exit qualification %x\n",
              ret, vmcs_read32(EXIT_QUALIFICATION));
       vcpu->ret_code = DUNE_RET_UNHANDLED_VMEXIT;
       vmx_dump_cpu(vcpu);

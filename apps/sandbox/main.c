@@ -22,10 +22,14 @@ struct elf_data {
 	int phnum;
 };
 
-static int process_elf_ph(struct dune_elf *elf, Elf64_Phdr *phdr)
-{
+
+/**
+ * Callback function called through dune_elf_iter_ph for each
+ * program header in the elf file.
+ *
+ */
+static int process_elf_ph(struct dune_elf *elf, Elf64_Phdr *phdr){
 	int ret;
-	int perm = PERM_U;
 	off_t off;
 
 	if (phdr->p_type == PT_INTERP) {
@@ -67,6 +71,9 @@ static int process_elf_ph(struct dune_elf *elf, Elf64_Phdr *phdr)
 		return ret;
 	}
 
+	// Look at the elf file header to figure out what permissions to give the current
+	// section, then use mprotect to apply perms.
+	int perm = PERM_U;
 	if (phdr->p_flags & PF_X)
 		perm |= PERM_X;
 	if (phdr->p_flags & PF_R)
@@ -84,8 +91,11 @@ static int process_elf_ph(struct dune_elf *elf, Elf64_Phdr *phdr)
 	return 0;
 }
 
-static int load_elf(const char *path, struct elf_data *data)
-{
+/**
+ * Give the path to and elf file, and an empty date structure for us to fill int.
+ * Fill data with the header information 
+ */
+static int load_elf(const char *path, struct elf_data *data){
 	int ret;
 	struct dune_elf elf;
 
@@ -323,7 +333,7 @@ int boxer_main(int argc, char *argv[])
 		printf("sandbox: failed to enter Dune mode\n");
 		return ret;
 	}
-
+	/* printf("Attempting to open executable: %s\n", argv[1]); */
 	ret = load_elf(argv[1], &data);
 	if (ret)
 		return ret;

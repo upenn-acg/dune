@@ -1,5 +1,6 @@
-/*
+/**
  * dune.h - the libdune API
+ * This header defines the main abstraction built for making Dune easier to use.
  */
 
 #ifndef HEADER_DUNE
@@ -38,7 +39,7 @@ extern void dune_set_user_fs(unsigned long fs_base);
 if (!(expr)) { \
 	dune_printf("ASSERT(" #expr ") at %s:%d in function %s\n", \
 			   __FILE__, __LINE__, __func__); \
-	dune_die(); \
+	dune_die();					  \
 }
 #endif /* assert */
 

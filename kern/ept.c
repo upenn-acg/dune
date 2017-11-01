@@ -744,7 +744,10 @@ static const struct mmu_notifier_ops ept_mmu_notifier_ops = {
 	.change_pte		= ept_mmu_notifier_change_pte,
 	.release		= ept_mmu_notifier_release,
 };
-
+ept
+/**
+ * Get a new page to be used as the root address for our EPT.
+ */
 int vmx_init_ept(struct vmx_vcpu *vcpu)
 {
 	void *page = (void *) __get_free_page(GFP_KERNEL);

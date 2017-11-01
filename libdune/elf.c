@@ -16,15 +16,17 @@
 #define MAX_SHNUM 100
 #define MAX_PHNUM 40
 
-static int elf_read(struct dune_elf *elf, void *dst, int len, int off)
-{
+/**
+ * Read len bytes of data into destination buffer starting at offset.
+ */
+static int elf_read(struct dune_elf *elf, void *dst, int len, int off){
 	int rd;
 
 	if (elf->mem == NULL)
 		return pread(elf->fd, dst, len, off);
-		
+
 	rd = elf->len - off;
-	
+
 	if (rd <= 0)
 		return 0;
 
@@ -138,8 +140,7 @@ static int elf_open_phs(struct dune_elf *elf)
  * returns an error code, it gets propogated to the return
  * value.
  */
-int dune_elf_iter_ph(struct dune_elf *elf, dune_elf_phcb cb)
-{
+int dune_elf_iter_ph(struct dune_elf *elf, dune_elf_phcb cb){
 	int i, ret;
 
 	if (elf->phdr == NULL) {
@@ -251,8 +252,11 @@ int dune_elf_iter_sh(struct dune_elf *elf, dune_elf_shcb cb)
 	return 0;
 }
 
-static int do_elf_open(struct dune_elf *elf)
-{
+/**
+ * Using the set file descriptor of the dune_elf struct, attempt to read from the fd and
+ * parse elf file. Does some sanity checking of file, populates elf file with information.
+ */
+static int do_elf_open(struct dune_elf *elf){
 	Elf64_Ehdr hdr;
 	int ret;
 
@@ -294,14 +298,14 @@ out:
 }
 
 /**
- * dune_elf_open - Open an elf binary
- * @elf: dune_elf object
+ * dune_elf_open - Open an elf binary, populate elf with the parsed header and file
+ * information.
+ * @elf: dune_elf object to fill.
  * @path: file path to the elf object
  *
  * Returns: 0 on success, otherwise failure.
  */
-int dune_elf_open(struct dune_elf *elf, const char *path)
-{
+int dune_elf_open(struct dune_elf *elf, const char *path){
 	int fd;
 
 	fd = open(path, O_RDONLY);
